@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: machine-adjustment-backend
+    env: node
+    region: singapore          # ใกล้ไทย
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: DATABASE_URL
+        sync: false            # ต้องใส่ค่าเองบน Render Dashboard
+      - key: NODE_ENV
+        value: production
+    healthCheckPath: /api/health

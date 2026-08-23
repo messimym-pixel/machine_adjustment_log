@@ -1,0 +1,31 @@
+{
+  "name": "machine-adjustment-log",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Machine Adjustment Log — factory machine adjustment tracking dashboard (React + Vite + Tailwind CSS)",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "vite",
+    "server": "node ../server/server.js",
+    "dev:all": "concurrently -n \"server,vite\" -c \"blue,green\" \"node ../server/server.js\" \"vite\"",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.15.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^10.0.5",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "vite": "^5.4.14"
+  }
+}
