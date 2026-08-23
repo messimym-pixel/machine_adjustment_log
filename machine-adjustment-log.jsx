@@ -11,6 +11,13 @@ import {
 } from "lucide-react";
 
 /* ============================================================
+   API BASE URL
+   In dev: empty string → Vite proxy handles /api/* → localhost:3001
+   In production (Vercel): reads VITE_API_URL → points to Render backend
+   ============================================================ */
+const API_BASE = import.meta.env.VITE_API_URL || "";
+
+/* ============================================================
    CONSTANTS
    ============================================================ */
 
@@ -2202,7 +2209,7 @@ export default function App() {
     try {
       // Check health
       try {
-        const hRes = await fetch("/api/health");
+        const hRes = await fetch(`${API_BASE}/api/health`);
         if (hRes.ok) {
           const hData = await hRes.json();
           setServerInfo(hData);
@@ -2215,7 +2222,7 @@ export default function App() {
 
       // Fetch lines
       try {
-        const lRes = await fetch("/api/lines");
+        const lRes = await fetch(`${API_BASE}/api/lines`);
         if (lRes.ok) {
           const lData = await lRes.json();
           if (Array.isArray(lData) && lData.length > 0) {
@@ -2227,13 +2234,13 @@ export default function App() {
       }
 
       // Fetch machines
-      const mRes = await fetch("/api/machines");
+      const mRes = await fetch(`${API_BASE}/api/machines`);
       if (!mRes.ok) throw new Error("Failed to fetch machines from API");
       const mData = await mRes.json();
       setMachines(mData);
 
       // Fetch records
-      const rRes = await fetch("/api/records");
+      const rRes = await fetch(`${API_BASE}/api/records`);
       if (!rRes.ok) throw new Error("Failed to fetch records from API");
       const rData = await rRes.json();
       setRecords(rData);
@@ -2256,7 +2263,7 @@ export default function App() {
 
   async function handleAddLine(name) {
     try {
-      const res = await fetch("/api/lines", {
+      const res = await fetch(`${API_BASE}/api/lines`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
@@ -2281,7 +2288,7 @@ export default function App() {
 
   async function handleDeleteLine(name) {
     try {
-      const res = await fetch(`/api/lines/${encodeURIComponent(name)}`, {
+      const res = await fetch(`${API_BASE}/api/lines/${encodeURIComponent(name)}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
@@ -2306,7 +2313,7 @@ export default function App() {
 
   async function handleSaveRecord(record) {
     try {
-      const res = await fetch("/api/records", {
+      const res = await fetch(`${API_BASE}/api/records`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(record),
@@ -2328,7 +2335,7 @@ export default function App() {
 
   async function handleUpdateRecord(updated) {
     try {
-      const res = await fetch(`/api/records/${updated.id}`, {
+      const res = await fetch(`${API_BASE}/api/records/${updated.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updated),
@@ -2350,7 +2357,7 @@ export default function App() {
 
   async function handleDeleteRecord(id) {
     try {
-      const res = await fetch(`/api/records/${id}`, { method: "DELETE" });
+      const res = await fetch(`${API_BASE}/api/records/${id}`, { method: "DELETE" });
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.error || "Failed to delete record");
@@ -2367,7 +2374,7 @@ export default function App() {
 
   async function handleAddMachine(machine) {
     try {
-      const res = await fetch("/api/machines", {
+      const res = await fetch(`${API_BASE}/api/machines`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(machine),
@@ -2389,7 +2396,7 @@ export default function App() {
 
   async function handleUpdateMachine(updated) {
     try {
-      const res = await fetch(`/api/machines/${updated.id}`, {
+      const res = await fetch(`${API_BASE}/api/machines/${updated.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updated),
@@ -2411,7 +2418,7 @@ export default function App() {
 
   async function handleDeleteMachine(id) {
     try {
-      const res = await fetch(`/api/machines/${id}`, { method: "DELETE" });
+      const res = await fetch(`${API_BASE}/api/machines/${id}`, { method: "DELETE" });
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.error || "Failed to delete machine");
