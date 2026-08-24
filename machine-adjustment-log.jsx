@@ -453,6 +453,44 @@ function LoadingRows({ dark }) {
   );
 }
 
+function LoadingOverlay({ message = "กำลังดำเนินการ...", dark }) {
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center">
+      {/* Backdrop */}
+      <div className={cx(
+        "absolute inset-0 backdrop-blur-sm",
+        dark ? "bg-slate-950/70" : "bg-slate-900/40"
+      )} />
+      {/* Dialog */}
+      <div className={cx(
+        "relative z-10 flex flex-col items-center gap-4 px-10 py-8 rounded-2xl shadow-2xl border",
+        dark
+          ? "bg-slate-800 border-slate-700 text-slate-100"
+          : "bg-white border-slate-200 text-slate-800"
+      )}>
+        {/* Spinner */}
+        <div className="relative w-14 h-14">
+          <div className="absolute inset-0 rounded-full border-4 border-blue-500/20" />
+          <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-blue-500 animate-spin" />
+        </div>
+        {/* Message */}
+        <p className="text-sm font-medium tracking-wide">{message}</p>
+        {/* Animated dots */}
+        <div className="flex gap-1.5">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce"
+              style={{ animationDelay: `${i * 0.15}s` }}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function Toast({ toast, dark }) {
   if (!toast) return null;
   const isError = toast.type === "error";
@@ -2101,7 +2139,7 @@ function Sidebar({ page, setPage, dark, mobileOpen, setMobileOpen }) {
         {NAV_ITEMS.map((item) => (
           <button
             key={item.key}
-            onClick={() => { setPage(item.key); setMobileOpen(false); }}
+            onClick={() => { setPage(item.key); localStorage.setItem("activePage", item.key); setMobileOpen(false); }}
             className={cx(
               "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
               page === item.key
@@ -2154,20 +2192,23 @@ function Header({ page, dark, setDark, setMobileOpen, connected, serverInfo }) {
         </div>
       </div>
       <div className="flex items-center gap-2 sm:gap-3">
-        {/* Network & SQLite DB status badge */}
-        <div
+        {/* PostgreSQL (Neon) DB status badge */}
+        <a
+          href="https://console.neon.tech/app/projects/noisy-mountain-48433226"
+          target="_blank"
+          rel="noopener noreferrer"
           className={cx(
-            "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border",
+            "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-opacity hover:opacity-75",
             connected
               ? dark ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-emerald-50 border-emerald-200 text-emerald-700"
               : dark ? "bg-rose-500/10 border-rose-500/30 text-rose-400" : "bg-rose-50 border-rose-200 text-rose-700"
           )}
-          title={connected ? `Connected to SQLite Database | LAN: ${serverInfo?.networkIps?.join(', ') || 'Local'}` : "Database offline / disconnected"}
+          title={connected ? "Connected to PostgreSQL (Neon) — click to open Neon Console" : "Database offline / disconnected"}
         >
           <Database className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">{connected ? "SQLite DB (LAN Shared)" : "Database Offline"}</span>
-          <span className="sm:hidden">{connected ? "SQLite" : "Offline"}</span>
-        </div>
+          <span className="hidden sm:inline">{connected ? "PostgreSQL (Neon)" : "Database Offline"}</span>
+          <span className="sm:hidden">{connected ? "Neon" : "Offline"}</span>
+        </a>
         <button
           onClick={() => setDark((d) => !d)}
           className={cx("p-2 rounded-lg border", dark ? "border-slate-600 text-amber-300 hover:bg-slate-800" : "border-slate-200 text-slate-500 hover:bg-slate-50")}
@@ -2186,9 +2227,10 @@ function Header({ page, dark, setDark, setMobileOpen, connected, serverInfo }) {
 
 export default function App() {
   const [dark, setDark] = useState(false);
-  const [page, setPage] = useState("dashboard");
+  const [page, setPage] = useState(() => localStorage.getItem("activePage") || "dashboard");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [apiLoading, setApiLoading] = useState(null); // null = hidden, string = message shown
   const [toast, setToast] = useState(null);
   const [connected, setConnected] = useState(true);
   const [serverInfo, setServerInfo] = useState(null);
@@ -2203,6 +2245,17 @@ export default function App() {
     setToast({ message, type });
     toastTimer.current = setTimeout(() => setToast(null), 3000);
   }, []);
+
+  // Wrap any async API call with loading overlay
+  const withApiLoading = useCallback(async (message, fn) => {
+    setApiLoading(message);
+    try {
+      return await fn();
+    } finally {
+      setApiLoading(null);
+    }
+  }, []);
+
 
   const loadData = useCallback(async () => {
     setLoading(true);
