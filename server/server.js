@@ -246,37 +246,41 @@ app.get("/api/records", async (req, res) => {
 });
 
 app.post("/api/records", async (req, res) => {
-  try {
-    const body = req.body;
-    const now = new Date().toISOString();
-    const id = body.id || `rec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const body = req.body;
+  const now = new Date().toISOString();
+  const id = body.id || `rec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const dateStr = body.adjustmentDate || now.slice(0, 10);
+  const stamp = dateStr.replace(/-/g, "");
+  const prefix = `ADJ-${stamp}-`;
 
-    // Generate recordId: ADJ-YYYYMMDD-XXX using MAX() from DB
-    // Wrapped in retry loop to handle rare concurrent insert collisions (pg error 23505)
-    const buildRecord = async () => {
-      let recordId = body.recordId;
-      if (!recordId) {
-        const dateStr = body.adjustmentDate || now.slice(0, 10);
-        const stamp = dateStr.replace(/-/g, "");
-        const prefix = `ADJ-${stamp}-`;
-        const result = await query(
-          `SELECT COALESCE(MAX(CAST(SPLIT_PART("recordId", '-', 3) AS INTEGER)), 0) AS maxnum
-           FROM records WHERE "recordId" LIKE $1`,
-          [`${prefix}%`]
-        );
-        const maxNum = parseInt(result.rows[0]?.maxnum ?? 0, 10);
-        recordId = `${prefix}${String(maxNum + 1).padStart(3, "0")}`;
-      }
-      return recordId;
-    };
+  // Use PostgreSQL advisory lock keyed on the date (e.g. 20260826)
+  // This serialises all concurrent inserts for the same day so recordId is always unique
+  const lockKey = parseInt(stamp, 10);
+  const client = await (await import("./db.js")).default.connect();
+
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock($1)", [lockKey]);
+
+    // Safe to query MAX — no other request can be here for same date until we COMMIT
+    let recordId = body.recordId;
+    if (!recordId) {
+      const result = await client.query(
+        `SELECT COALESCE(MAX(CAST(SPLIT_PART("recordId", '-', 3) AS INTEGER)), 0) AS maxnum
+         FROM records WHERE "recordId" LIKE $1`,
+        [`${prefix}%`]
+      );
+      const maxNum = parseInt(result.rows[0]?.maxnum ?? 0, 10);
+      recordId = `${prefix}${String(maxNum + 1).padStart(3, "0")}`;
+    }
 
     const newRecord = {
       id,
-      recordId: null,
+      recordId,
       machineId: body.machineId || "",
       machineName: body.machineName || "-",
       productionLine: body.productionLine || "Line 1",
-      adjustmentDate: body.adjustmentDate || now.slice(0, 10),
+      adjustmentDate: dateStr,
       category: body.category || "Setup",
       problemReason: body.problemReason || "-",
       parameterName: body.parameterName || "-",
@@ -294,41 +298,29 @@ app.post("/api/records", async (req, res) => {
       updatedAt: now,
     };
 
-    // Try INSERT, retry up to 5 times on unique recordId collision (pg error 23505)
-    const MAX_ATTEMPTS = 5;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      newRecord.recordId = await buildRecord();
-      try {
-        await query(
-          `INSERT INTO records (
-            id, "recordId", "machineId", "machineName", "productionLine", "adjustmentDate", category,
-            "problemReason", "parameterName", "beforeAdjustment", "afterAdjustment", "adjustmentDetails",
-            "downtimeStart", "downtimeEnd", "downtimeMinutes", result, "adjustedBy", "verifiedBy", remark, "createdAt", "updatedAt"
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
-          [
-            newRecord.id, newRecord.recordId, newRecord.machineId, newRecord.machineName, newRecord.productionLine,
-            newRecord.adjustmentDate, newRecord.category, newRecord.problemReason, newRecord.parameterName,
-            newRecord.beforeAdjustment, newRecord.afterAdjustment, newRecord.adjustmentDetails,
-            newRecord.downtimeStart, newRecord.downtimeEnd, newRecord.downtimeMinutes, newRecord.result,
-            newRecord.adjustedBy, newRecord.verifiedBy, newRecord.remark, newRecord.createdAt, newRecord.updatedAt,
-          ]
-        );
-        break; // INSERT succeeded — exit retry loop
-      } catch (insertErr) {
-        // 23505 = unique_violation in PostgreSQL
-        if (insertErr.code === "23505" && insertErr.constraint === "records_recordId_key" && attempt < MAX_ATTEMPTS) {
-          logger.warn(`recordId collision on attempt ${attempt}, retrying...`, { recordId: newRecord.recordId });
-          await new Promise(r => setTimeout(r, attempt * 20)); // back-off
-          continue;
-        }
-        throw insertErr; // re-throw unexpected errors
-      }
-    }
+    await client.query(
+      `INSERT INTO records (
+        id, "recordId", "machineId", "machineName", "productionLine", "adjustmentDate", category,
+        "problemReason", "parameterName", "beforeAdjustment", "afterAdjustment", "adjustmentDetails",
+        "downtimeStart", "downtimeEnd", "downtimeMinutes", result, "adjustedBy", "verifiedBy", remark, "createdAt", "updatedAt"
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+      [
+        newRecord.id, newRecord.recordId, newRecord.machineId, newRecord.machineName, newRecord.productionLine,
+        newRecord.adjustmentDate, newRecord.category, newRecord.problemReason, newRecord.parameterName,
+        newRecord.beforeAdjustment, newRecord.afterAdjustment, newRecord.adjustmentDetails,
+        newRecord.downtimeStart, newRecord.downtimeEnd, newRecord.downtimeMinutes, newRecord.result,
+        newRecord.adjustedBy, newRecord.verifiedBy, newRecord.remark, newRecord.createdAt, newRecord.updatedAt,
+      ]
+    );
 
+    await client.query("COMMIT");
     res.status(201).json(newRecord);
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
     logger.error("Error creating record:", { message: error?.message ?? String(error) });
     res.status(500).json({ error: error.message || "Failed to create record" });
+  } finally {
+    client.release();
   }
 });
 
