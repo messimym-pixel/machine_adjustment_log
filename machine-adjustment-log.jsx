@@ -1116,8 +1116,11 @@ function getLineDowntimeData(records) {
   const { minDate, maxDate, dayCount } = getRecordDateSpan(records);
   const totalPossibleMinutes = dayCount * SHIFT_HOURS_PER_DAY * 60;
 
+  // normalize helper: trim + lowercase for comparison
+  const norm = (s) => (s || "").trim().toLowerCase();
+
   return LINES.map((line) => {
-    const lineRecords = records.filter((r) => r.productionLine === line);
+    const lineRecords = records.filter((r) => norm(r.productionLine) === norm(line));
     const totalDowntime = lineRecords.reduce((sum, r) => sum + (Number(r.downtimeMinutes) || 0), 0);
     const rate = totalPossibleMinutes > 0 ? (totalDowntime / totalPossibleMinutes) * 100 : 0;
     const rateRounded = Math.round(rate * 10) / 10;
@@ -1365,11 +1368,34 @@ function DashboardPage({ records, machines, dark }) {
     return buildTrendBuckets(periodScoped, filters.period, range);
   }, [periodScoped, filters.period, selectedWeekStart]);
 
+  // lineScoped: same date period but NO machine filter — for per-line downtime
+  const lineScoped = useMemo(() => {
+    // Apply only date-range filter (no machine filter)
+    const dateFiltered = records.filter((r) =>
+      isWithinRange(r.adjustmentDate, filters.startDate, filters.endDate)
+    );
+    if (filters.startDate || filters.endDate) return dateFiltered;
+    if (filters.period === "day") {
+      const todayStr = nowDateStr();
+      return dateFiltered.filter((r) => r.adjustmentDate === todayStr);
+    }
+    if (filters.period === "week") {
+      const ws = selectedWeekStart;
+      const we = new Date(ws); we.setDate(ws.getDate() + 6);
+      const wsStr = `${ws.getFullYear()}-${pad(ws.getMonth() + 1)}-${pad(ws.getDate())}`;
+      const weStr = `${we.getFullYear()}-${pad(we.getMonth() + 1)}-${pad(we.getDate())}`;
+      return dateFiltered.filter((r) => r.adjustmentDate >= wsStr && r.adjustmentDate <= weStr);
+    }
+    const today = new Date();
+    const monthKey = `${today.getFullYear()}-${pad(today.getMonth() + 1)}`;
+    return dateFiltered.filter((r) => r.adjustmentDate.startsWith(monthKey));
+  }, [records, filters, selectedWeekStart]);
+
   return (
     <div className="space-y-5">
       <DashboardFilters filters={filters} setFilters={setFilters} machines={machines} dark={dark} />
       <SummaryCards stats={stats} dark={dark} />
-      <DowntimeByLineSection records={periodScoped} dark={dark} />
+      <DowntimeByLineSection records={lineScoped} dark={dark} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <AdjustmentTrendChart buckets={buckets} dark={dark} />
         <DowntimeTrendChart buckets={buckets} dark={dark} />
