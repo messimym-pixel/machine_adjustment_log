@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import {
   LayoutDashboard, PlusCircle, History, Settings2, Menu, X,
@@ -856,7 +856,7 @@ function SummaryCards({ stats, dark }) {
 function DashboardFilters({ filters, setFilters, machines, dark }) {
   const weekOptions = useMemo(() => buildIsoWeekOptions(20, 1), []);
   return (
-    <Card dark={dark} className="p-4">
+    <Card dark={dark} className="p-4 overflow-visible relative z-20">
       <div className="flex flex-wrap items-end gap-4">
         <div>
           <label className={cx("text-xs font-medium block mb-1", dark ? "text-slate-400" : "text-slate-500")}>Period</label>
@@ -1090,6 +1090,197 @@ function ResultDonutChart({ records, dark }) {
 }
 
 /* ============================================================
+   DOWNTIME BY LINE
+   ============================================================ */
+
+const DOWNTIME_TARGET_ORANGE = 5;   // > 5%  → orange
+const DOWNTIME_TARGET_RED = 10;     // > 10% → red
+const SHIFT_HOURS_PER_DAY = 24;     // factory runs 24 hours per day
+
+function getLineDowntimeData(records, startDate, endDate) {
+  // Count how many distinct days are in the range
+  let dayCount = 1;
+  if (startDate && endDate) {
+    const s = new Date(startDate + "T00:00:00");
+    const e = new Date(endDate + "T00:00:00");
+    dayCount = Math.max(1, Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1);
+  }
+  const totalPossibleMinutes = dayCount * SHIFT_HOURS_PER_DAY * 60;
+
+  return LINES.map((line) => {
+    const lineRecords = records.filter((r) => r.productionLine === line);
+    const totalDowntime = lineRecords.reduce((sum, r) => sum + (Number(r.downtimeMinutes) || 0), 0);
+    const rate = totalPossibleMinutes > 0 ? (totalDowntime / totalPossibleMinutes) * 100 : 0;
+    const rateRounded = Math.round(rate * 10) / 10;
+    const color = rateRounded > DOWNTIME_TARGET_RED ? "#ef4444"
+      : rateRounded > DOWNTIME_TARGET_ORANGE ? "#f97316"
+      : "#22c55e";
+    const colorClass = rateRounded > DOWNTIME_TARGET_RED
+      ? { bg: "bg-red-50 dark:bg-red-500/10", text: "text-red-600", badge: "bg-red-100 text-red-700", bar: "bg-red-500" }
+      : rateRounded > DOWNTIME_TARGET_ORANGE
+      ? { bg: "bg-orange-50 dark:bg-orange-500/10", text: "text-orange-600", badge: "bg-orange-100 text-orange-700", bar: "bg-orange-500" }
+      : { bg: "bg-emerald-50 dark:bg-emerald-500/10", text: "text-emerald-600", badge: "bg-emerald-100 text-emerald-700", bar: "bg-emerald-500" };
+    return { line, totalDowntime, rate: rateRounded, color, colorClass, count: lineRecords.length };
+  });
+}
+
+function DowntimeByLineSection({ records, filters, dark }) {
+  const lineData = useMemo(
+    () => getLineDowntimeData(records, filters.startDate, filters.endDate),
+    [records, filters.startDate, filters.endDate]
+  );
+
+  const hasAnyData = lineData.some((d) => d.totalDowntime > 0);
+
+  // Custom bar colors for recharts
+  const barData = lineData.map((d) => ({ ...d, fill: d.color }));
+
+  return (
+    <div className="space-y-4">
+      {/* Summary Cards per Line */}
+      <Card dark={dark} className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <p className={cx("text-sm font-semibold", dark ? "text-slate-100" : "text-slate-800")}>
+              Downtime Rate by Line
+            </p>
+            <p className={cx("text-xs", dark ? "text-slate-400" : "text-slate-500")}>
+              อัตราหยุดเครื่องแยกตามสายการผลิต · Target: <span className="text-orange-500 font-medium">&gt;5% 🟠</span> · <span className="text-red-500 font-medium">&gt;10% 🔴</span>
+            </p>
+          </div>
+          <div className={cx("text-xs px-2 py-1 rounded-md", dark ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500")}>
+            Base: {SHIFT_HOURS_PER_DAY}h/day
+          </div>
+        </div>
+
+        {/* Line cards grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+          {lineData.map((d) => {
+            const isOver10 = d.rate > DOWNTIME_TARGET_RED;
+            const isOver5 = d.rate > DOWNTIME_TARGET_ORANGE;
+            const bgDark = isOver10
+              ? "bg-red-500/10 border border-red-500/30"
+              : isOver5
+              ? "bg-orange-500/10 border border-orange-500/30"
+              : "bg-emerald-500/10 border border-emerald-500/30";
+            const bgLight = isOver10
+              ? "bg-red-50 border border-red-200"
+              : isOver5
+              ? "bg-orange-50 border border-orange-200"
+              : "bg-emerald-50 border border-emerald-200";
+            const textDark = isOver10 ? "text-red-400" : isOver5 ? "text-orange-400" : "text-emerald-400";
+            const textLight = isOver10 ? "text-red-600" : isOver5 ? "text-orange-600" : "text-emerald-700";
+            const rateTextDark = isOver10 ? "text-red-300" : isOver5 ? "text-orange-300" : "text-emerald-300";
+            const rateTextLight = isOver10 ? "text-red-700" : isOver5 ? "text-orange-700" : "text-emerald-800";
+
+            return (
+              <div
+                key={d.line}
+                className={cx(
+                  "rounded-xl p-3 flex flex-col gap-1.5",
+                  dark ? bgDark : bgLight
+                )}
+              >
+                <div className="flex items-center justify-between">
+                  <span className={cx("text-xs font-semibold truncate", dark ? textDark : textLight)}>
+                    {d.line}
+                  </span>
+                  {isOver10 && <span className="text-base">🔴</span>}
+                  {!isOver10 && isOver5 && <span className="text-base">🟠</span>}
+                  {!isOver5 && <span className="text-base">🟢</span>}
+                </div>
+                <p className={cx("text-2xl font-bold leading-none", dark ? rateTextDark : rateTextLight)}>
+                  {d.rate}%
+                </p>
+                <p className={cx("text-[11px]", dark ? "text-slate-400" : "text-slate-500")}>
+                  {minutesToHM(d.totalDowntime)} downtime
+                </p>
+                <p className={cx("text-[11px]", dark ? "text-slate-500" : "text-slate-400")}>
+                  {d.count} adjustment{d.count !== 1 ? "s" : ""}
+                </p>
+                {/* Mini progress bar */}
+                <div className={cx("mt-0.5 h-1.5 rounded-full overflow-hidden", dark ? "bg-slate-700" : "bg-white/60")}>
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${Math.min(100, (d.rate / 20) * 100)}%`,
+                      backgroundColor: d.color,
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {/* Bar Chart comparison */}
+      <Card dark={dark} className="p-4">
+        <SectionTitle title="Downtime Rate Comparison" subtitle="เปรียบเทียบ Downtime Rate (%) แต่ละสายการผลิต" dark={dark} />
+        {!hasAnyData ? (
+          <EmptyState icon={Gauge} title="No downtime data for this period" subtitle="Try widening the date range or choosing a different filter." dark={dark} />
+        ) : (
+          <div className="h-52">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={barData} margin={{ top: 8, right: 16, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={gridColor(dark)} vertical={false} />
+                <XAxis dataKey="line" tick={{ fontSize: 12, fill: axisColor(dark) }} axisLine={{ stroke: gridColor(dark) }} tickLine={false} />
+                <YAxis
+                  allowDecimals={false}
+                  tick={{ fontSize: 11, fill: axisColor(dark) }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => `${v}%`}
+                  domain={[0, (dataMax) => Math.max(dataMax + 2, 15)]}
+                />
+                <Tooltip
+                  formatter={(value, name, props) => [
+                    `${value}% (${minutesToHM(props.payload.totalDowntime)})`,
+                    "Downtime Rate",
+                  ]}
+                  contentStyle={{
+                    background: dark ? "#1e293b" : "#fff",
+                    border: `1px solid ${gridColor(dark)}`,
+                    borderRadius: 8,
+                    fontSize: 12,
+                  }}
+                />
+                {/* Target reference lines */}
+                <ReferenceLine y={DOWNTIME_TARGET_ORANGE} stroke="#f97316" strokeDasharray="4 3" strokeWidth={1.5} label={{ value: `${DOWNTIME_TARGET_ORANGE}%`, position: "insideTopRight", fontSize: 10, fill: "#f97316" }} />
+                <ReferenceLine y={DOWNTIME_TARGET_RED} stroke="#ef4444" strokeDasharray="4 3" strokeWidth={1.5} label={{ value: `${DOWNTIME_TARGET_RED}%`, position: "insideTopRight", fontSize: 10, fill: "#ef4444" }} />
+                <Bar dataKey="rate" name="Downtime Rate (%)" radius={[4, 4, 0, 0]} isAnimationActive>
+                  {barData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+        {/* Legend */}
+        <div className="flex items-center gap-4 mt-2 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm bg-emerald-500 inline-block" />
+            <span className={cx("text-xs", dark ? "text-slate-400" : "text-slate-500")}>≤{DOWNTIME_TARGET_ORANGE}% OK</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm bg-orange-500 inline-block" />
+            <span className={cx("text-xs", dark ? "text-slate-400" : "text-slate-500")}>&gt;{DOWNTIME_TARGET_ORANGE}% Warning</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm bg-red-500 inline-block" />
+            <span className={cx("text-xs", dark ? "text-slate-400" : "text-slate-500")}>&gt;{DOWNTIME_TARGET_RED}% Critical</span>
+          </div>
+          <span className={cx("text-[11px] ml-auto", dark ? "text-slate-500" : "text-slate-400")}>
+            * Rate = Downtime ÷ ({SHIFT_HOURS_PER_DAY}h × days in range)
+          </span>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ============================================================
    DASHBOARD PAGE
    ============================================================ */
 
@@ -1159,6 +1350,7 @@ function DashboardPage({ records, machines, dark }) {
     <div className="space-y-5">
       <DashboardFilters filters={filters} setFilters={setFilters} machines={machines} dark={dark} />
       <SummaryCards stats={stats} dark={dark} />
+      <DowntimeByLineSection records={periodScoped} filters={filters} dark={dark} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <AdjustmentTrendChart buckets={buckets} dark={dark} />
         <DowntimeTrendChart buckets={buckets} dark={dark} />
@@ -2131,7 +2323,7 @@ function Sidebar({ page, setPage, dark, mobileOpen, setMobileOpen }) {
           <Settings2 className="w-3.5 h-3.5 absolute -bottom-0.5 -right-0.5 text-amber-300 drop-shadow" />
         </div>
         <div>
-          <p className={cx("font-semibold text-sm leading-tight", dark ? "text-white" : "text-slate-900")}>Machine Adjustment Log</p>
+          <p className={cx("font-semibold text-sm leading-tight", dark ? "text-white" : "text-slate-900")}>Machine Adjustment Record</p>
           <p className={cx("text-[11px] leading-tight", dark ? "text-slate-400" : "text-slate-400")}>ระบบบันทึกการปรับตั้งเครื่องจักร</p>
         </div>
       </div>
@@ -2187,7 +2379,7 @@ function Header({ page, dark, setDark, setMobileOpen, connected, serverInfo }) {
           <Menu className="w-5 h-5" />
         </button>
         <div className="min-w-0">
-          <p className={cx("text-xs", dark ? "text-slate-500" : "text-slate-400")}>Machine Adjustment Log</p>
+          <p className={cx("text-xs", dark ? "text-slate-500" : "text-slate-400")}>Machine Adjustment Record</p>
           <h1 className={cx("text-lg font-semibold truncate", dark ? "text-white" : "text-slate-900")}>{current?.label}</h1>
         </div>
       </div>
