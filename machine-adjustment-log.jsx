@@ -1116,11 +1116,15 @@ function getLineDowntimeData(records) {
   const { minDate, maxDate, dayCount } = getRecordDateSpan(records);
   const totalPossibleMinutes = dayCount * SHIFT_HOURS_PER_DAY * 60;
 
-  // normalize helper: trim + lowercase for comparison
-  const norm = (s) => (s || "").trim().toLowerCase();
+  // Derive unique production lines from actual records (exclude empty)
+  const uniqueLines = [...new Set(
+    records.map((r) => (r.productionLine || "").trim()).filter(Boolean)
+  )].sort();
 
-  return LINES.map((line) => {
-    const lineRecords = records.filter((r) => norm(r.productionLine) === norm(line));
+  if (uniqueLines.length === 0) return [];
+
+  return uniqueLines.map((line) => {
+    const lineRecords = records.filter((r) => (r.productionLine || "").trim() === line);
     const totalDowntime = lineRecords.reduce((sum, r) => sum + (Number(r.downtimeMinutes) || 0), 0);
     const rate = totalPossibleMinutes > 0 ? (totalDowntime / totalPossibleMinutes) * 100 : 0;
     const rateRounded = Math.round(rate * 10) / 10;
@@ -1128,10 +1132,10 @@ function getLineDowntimeData(records) {
       : rateRounded > DOWNTIME_TARGET_ORANGE ? "#f97316"
       : "#22c55e";
     const colorClass = rateRounded > DOWNTIME_TARGET_RED
-      ? { bg: "bg-red-50 dark:bg-red-500/10", text: "text-red-600", badge: "bg-red-100 text-red-700", bar: "bg-red-500" }
+      ? { bg: "bg-red-50", text: "text-red-600", bar: "bg-red-500" }
       : rateRounded > DOWNTIME_TARGET_ORANGE
-      ? { bg: "bg-orange-50 dark:bg-orange-500/10", text: "text-orange-600", badge: "bg-orange-100 text-orange-700", bar: "bg-orange-500" }
-      : { bg: "bg-emerald-50 dark:bg-emerald-500/10", text: "text-emerald-600", badge: "bg-emerald-100 text-emerald-700", bar: "bg-emerald-500" };
+      ? { bg: "bg-orange-50", text: "text-orange-600", bar: "bg-orange-500" }
+      : { bg: "bg-emerald-50", text: "text-emerald-600", bar: "bg-emerald-500" };
     return { line, totalDowntime, rate: rateRounded, color, colorClass, count: lineRecords.length, totalPossibleMinutes, dayCount, minDate, maxDate };
   });
 }
@@ -1175,8 +1179,17 @@ function DowntimeByLineSection({ records, dark }) {
           </div>
         </div>
 
-        {/* Line cards grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+        {/* Line cards grid — responsive to number of lines */}
+        {lineData.length === 0 ? (
+          <EmptyState icon={Gauge} title="No production line data" subtitle="Records ในช่วงนี้ยังไม่มีการระบุ Production Line" dark={dark} />
+        ) : (
+        <div className={cx(
+          "grid gap-3",
+          lineData.length <= 3 ? "grid-cols-1 sm:grid-cols-3" :
+          lineData.length <= 4 ? "grid-cols-2 sm:grid-cols-4" :
+          lineData.length <= 6 ? "grid-cols-2 sm:grid-cols-3 xl:grid-cols-6" :
+          "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
+        )}>
           {lineData.map((d) => {
             const isOver10 = d.rate > DOWNTIME_TARGET_RED;
             const isOver5 = d.rate > DOWNTIME_TARGET_ORANGE;
@@ -1234,6 +1247,7 @@ function DowntimeByLineSection({ records, dark }) {
             );
           })}
         </div>
+        )}
       </Card>
 
       {/* Bar Chart comparison */}
