@@ -1096,19 +1096,22 @@ function ResultDonutChart({ records, dark }) {
 const DOWNTIME_TARGET_ORANGE = 5;   // > 5%  → orange
 const DOWNTIME_TARGET_RED = 10;     // > 10% → red
 const SHIFT_HOURS_PER_DAY = 24;     // factory runs 24 hours per day
+const DOWNTIME_FIXED_START = "2026-08-28"; // cumulative rate starts from this date
 
-function getLineDowntimeData(records, startDate, endDate) {
-  // Count how many distinct days are in the range
-  let dayCount = 1;
-  if (startDate && endDate) {
-    const s = new Date(startDate + "T00:00:00");
-    const e = new Date(endDate + "T00:00:00");
-    dayCount = Math.max(1, Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1);
-  }
+function getLineDowntimeData(allRecords) {
+  // Always calculate from the fixed start date to today
+  const startDate = DOWNTIME_FIXED_START;
+  const today = toIsoDate(new Date());
+  const s = new Date(startDate + "T00:00:00");
+  const e = new Date(today + "T00:00:00");
+  const dayCount = Math.max(1, Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1);
   const totalPossibleMinutes = dayCount * SHIFT_HOURS_PER_DAY * 60;
 
+  // Filter only records from DOWNTIME_FIXED_START onwards
+  const scopedRecords = allRecords.filter((r) => r.adjustmentDate >= startDate);
+
   return LINES.map((line) => {
-    const lineRecords = records.filter((r) => r.productionLine === line);
+    const lineRecords = scopedRecords.filter((r) => r.productionLine === line);
     const totalDowntime = lineRecords.reduce((sum, r) => sum + (Number(r.downtimeMinutes) || 0), 0);
     const rate = totalPossibleMinutes > 0 ? (totalDowntime / totalPossibleMinutes) * 100 : 0;
     const rateRounded = Math.round(rate * 10) / 10;
@@ -1120,14 +1123,14 @@ function getLineDowntimeData(records, startDate, endDate) {
       : rateRounded > DOWNTIME_TARGET_ORANGE
       ? { bg: "bg-orange-50 dark:bg-orange-500/10", text: "text-orange-600", badge: "bg-orange-100 text-orange-700", bar: "bg-orange-500" }
       : { bg: "bg-emerald-50 dark:bg-emerald-500/10", text: "text-emerald-600", badge: "bg-emerald-100 text-emerald-700", bar: "bg-emerald-500" };
-    return { line, totalDowntime, rate: rateRounded, color, colorClass, count: lineRecords.length };
+    return { line, totalDowntime, rate: rateRounded, color, colorClass, count: lineRecords.length, dayCount };
   });
 }
 
-function DowntimeByLineSection({ records, filters, dark }) {
+function DowntimeByLineSection({ allRecords, dark }) {
   const lineData = useMemo(
-    () => getLineDowntimeData(records, filters.startDate, filters.endDate),
-    [records, filters.startDate, filters.endDate]
+    () => getLineDowntimeData(allRecords),
+    [allRecords]
   );
 
   const hasAnyData = lineData.some((d) => d.totalDowntime > 0);
@@ -1145,11 +1148,12 @@ function DowntimeByLineSection({ records, filters, dark }) {
               Downtime Rate by Line
             </p>
             <p className={cx("text-xs", dark ? "text-slate-400" : "text-slate-500")}>
-              อัตราหยุดเครื่องแยกตามสายการผลิต · Target: <span className="text-orange-500 font-medium">&gt;5% 🟠</span> · <span className="text-red-500 font-medium">&gt;10% 🔴</span>
+              สะสมตั้งแต่ 28 Aug 2026 ถึงวันนี้ · Target: <span className="text-orange-500 font-medium">&gt;5% 🟠</span> · <span className="text-red-500 font-medium">&gt;10% 🔴</span>
             </p>
           </div>
-          <div className={cx("text-xs px-2 py-1 rounded-md", dark ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500")}>
-            Base: {SHIFT_HOURS_PER_DAY}h/day
+          <div className={cx("text-xs px-2 py-1 rounded-md text-center", dark ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500")}>
+            <div className="font-semibold">Since 28 Aug</div>
+            <div>{lineData[0]?.dayCount ?? 1} days · {SHIFT_HOURS_PER_DAY}h/day</div>
           </div>
         </div>
 
@@ -1272,7 +1276,7 @@ function DowntimeByLineSection({ records, filters, dark }) {
             <span className={cx("text-xs", dark ? "text-slate-400" : "text-slate-500")}>&gt;{DOWNTIME_TARGET_RED}% Critical</span>
           </div>
           <span className={cx("text-[11px] ml-auto", dark ? "text-slate-500" : "text-slate-400")}>
-            * Rate = Downtime ÷ ({SHIFT_HOURS_PER_DAY}h × days in range)
+            * Rate = Downtime ÷ ({SHIFT_HOURS_PER_DAY}h × จำนวนวัน ตั้งแต่ 28 Aug 2026)
           </span>
         </div>
       </Card>
@@ -1350,7 +1354,7 @@ function DashboardPage({ records, machines, dark }) {
     <div className="space-y-5">
       <DashboardFilters filters={filters} setFilters={setFilters} machines={machines} dark={dark} />
       <SummaryCards stats={stats} dark={dark} />
-      <DowntimeByLineSection records={periodScoped} filters={filters} dark={dark} />
+      <DowntimeByLineSection allRecords={records} dark={dark} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <AdjustmentTrendChart buckets={buckets} dark={dark} />
         <DowntimeTrendChart buckets={buckets} dark={dark} />
