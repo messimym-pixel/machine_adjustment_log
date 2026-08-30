@@ -1097,36 +1097,24 @@ const DOWNTIME_TARGET_ORANGE = 5;   // > 5%  → orange
 const DOWNTIME_TARGET_RED = 10;     // > 10% → red
 const SHIFT_HOURS_PER_DAY = 24;     // factory runs 24 hours per day
 
-function getPeriodTotalMinutes(filters, selectedWeekStart) {
-  // If custom date range is set
-  if (filters.startDate && filters.endDate) {
-    const s = new Date(filters.startDate + "T00:00:00");
-    const e = new Date(filters.endDate + "T00:00:00");
-    const days = Math.max(1, Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1);
-    return days * SHIFT_HOURS_PER_DAY * 60;
-  }
-  if (filters.period === "day") return 1 * SHIFT_HOURS_PER_DAY * 60;
-  if (filters.period === "week") return 7 * SHIFT_HOURS_PER_DAY * 60;
-  if (filters.period === "month") {
-    const today = new Date();
-    const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-    return daysInMonth * SHIFT_HOURS_PER_DAY * 60;
-  }
-  return 7 * SHIFT_HOURS_PER_DAY * 60; // fallback
+/** คำนวณ span จากข้อมูลที่ record จริง: earliest → latest adjustmentDate */
+function getRecordDateSpan(records) {
+  const dates = records
+    .map((r) => r.adjustmentDate)
+    .filter(Boolean)
+    .sort();
+  if (dates.length === 0) return { minDate: null, maxDate: null, dayCount: 1 };
+  const minDate = dates[0];
+  const maxDate = dates[dates.length - 1];
+  const s = new Date(minDate + "T00:00:00");
+  const e = new Date(maxDate + "T00:00:00");
+  const dayCount = Math.max(1, Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1);
+  return { minDate, maxDate, dayCount };
 }
 
-function getPeriodLabel(filters) {
-  if (filters.startDate && filters.endDate)
-    return `${formatDate(filters.startDate)} – ${formatDate(filters.endDate)}`;
-  if (filters.startDate) return `From ${formatDate(filters.startDate)}`;
-  if (filters.period === "day") return "Today";
-  if (filters.period === "week") return "This Week";
-  if (filters.period === "month") return "This Month";
-  return "";
-}
-
-function getLineDowntimeData(records, filters, selectedWeekStart) {
-  const totalPossibleMinutes = getPeriodTotalMinutes(filters, selectedWeekStart);
+function getLineDowntimeData(records) {
+  const { minDate, maxDate, dayCount } = getRecordDateSpan(records);
+  const totalPossibleMinutes = dayCount * SHIFT_HOURS_PER_DAY * 60;
 
   return LINES.map((line) => {
     const lineRecords = records.filter((r) => r.productionLine === line);
@@ -1141,14 +1129,15 @@ function getLineDowntimeData(records, filters, selectedWeekStart) {
       : rateRounded > DOWNTIME_TARGET_ORANGE
       ? { bg: "bg-orange-50 dark:bg-orange-500/10", text: "text-orange-600", badge: "bg-orange-100 text-orange-700", bar: "bg-orange-500" }
       : { bg: "bg-emerald-50 dark:bg-emerald-500/10", text: "text-emerald-600", badge: "bg-emerald-100 text-emerald-700", bar: "bg-emerald-500" };
-    return { line, totalDowntime, rate: rateRounded, color, colorClass, count: lineRecords.length, totalPossibleMinutes };
+    return { line, totalDowntime, rate: rateRounded, color, colorClass, count: lineRecords.length, totalPossibleMinutes, dayCount, minDate, maxDate };
   });
 }
 
-function DowntimeByLineSection({ records, filters, selectedWeekStart, dark }) {
+function DowntimeByLineSection({ records, dark }) {
+  const { minDate, maxDate, dayCount } = useMemo(() => getRecordDateSpan(records), [records]);
   const lineData = useMemo(
-    () => getLineDowntimeData(records, filters, selectedWeekStart),
-    [records, filters, selectedWeekStart]
+    () => getLineDowntimeData(records),
+    [records]
   );
 
   const hasAnyData = lineData.some((d) => d.totalDowntime > 0);
@@ -1169,9 +1158,17 @@ function DowntimeByLineSection({ records, filters, selectedWeekStart, dark }) {
               อัตราหยุดเครื่องแยกตามสายการผลิต · Target: <span className="text-orange-500 font-medium">&gt;5% 🟠</span> · <span className="text-red-500 font-medium">&gt;10% 🔴</span>
             </p>
           </div>
-          <div className={cx("text-xs px-2 py-1 rounded-md text-center", dark ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500")}>
-            <div className="font-semibold">{getPeriodLabel(filters)}</div>
-            <div>{minutesToHM(lineData[0]?.totalPossibleMinutes ?? 0)} / line</div>
+          <div className={cx("text-xs px-2 py-1 rounded-md text-center leading-relaxed", dark ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500")}>
+            {minDate && maxDate ? (
+              <>
+                <div className="font-semibold">{formatDate(minDate)}</div>
+                <div className="opacity-60">→</div>
+                <div className="font-semibold">{formatDate(maxDate)}</div>
+                <div className="mt-0.5">{dayCount} วัน · {SHIFT_HOURS_PER_DAY}h/day</div>
+              </>
+            ) : (
+              <div>No data</div>
+            )}
           </div>
         </div>
 
@@ -1294,7 +1291,7 @@ function DowntimeByLineSection({ records, filters, selectedWeekStart, dark }) {
             <span className={cx("text-xs", dark ? "text-slate-400" : "text-slate-500")}>&gt;{DOWNTIME_TARGET_RED}% Critical</span>
           </div>
           <span className={cx("text-[11px] ml-auto", dark ? "text-slate-500" : "text-slate-400")}>
-            * Rate = Downtime ÷ เวลาทั้งหมดใน period ({SHIFT_HOURS_PER_DAY}h/day)
+            * Rate = Downtime ÷ (วันแรก→วันล่าสุดที่มี record × {SHIFT_HOURS_PER_DAY}h)
           </span>
         </div>
       </Card>
@@ -1372,7 +1369,7 @@ function DashboardPage({ records, machines, dark }) {
     <div className="space-y-5">
       <DashboardFilters filters={filters} setFilters={setFilters} machines={machines} dark={dark} />
       <SummaryCards stats={stats} dark={dark} />
-      <DowntimeByLineSection records={periodScoped} filters={filters} selectedWeekStart={selectedWeekStart} dark={dark} />
+      <DowntimeByLineSection records={periodScoped} dark={dark} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <AdjustmentTrendChart buckets={buckets} dark={dark} />
         <DowntimeTrendChart buckets={buckets} dark={dark} />
