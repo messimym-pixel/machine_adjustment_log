@@ -814,12 +814,184 @@ function DateRangePicker({ startDate, endDate, onChange, dark, placeholder = "Se
    SUMMARY CARDS
    ============================================================ */
 
-function SummaryCards({ stats, dark }) {
+/* ────────────────────────────────────────────
+   SUMMARY DETAIL MODAL
+   Opens when clicking Total Adjustments,
+   Machines Adjusted, or Total Downtime card
+   ──────────────────────────────────────────── */
+function SummaryDetailModal({ type, records, dark, onClose }) {
+  // Close on Escape key
+  useEffect(() => {
+    function onKey(e) { if (e.key === "Escape") onClose(); }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const title = type === "adjustments" ? "All Adjustments"
+    : type === "machines" ? "Machines Adjusted"
+    : "Downtime Breakdown";
+
+  const subtitle = type === "adjustments" ? `จำนวนรายการทั้งหมด ${records.length} รายการ`
+    : type === "machines" ? "เครื่องจักรที่มีการปรับตั้งในช่วงนี้"
+    : "เวลาหยุดเครื่องแยกตามเครื่องจักร";
+
+  // Build data depending on type
+  const machineRows = useMemo(() => {
+    if (type !== "machines" && type !== "downtime") return [];
+    const map = {};
+    records.forEach((r) => {
+      if (!map[r.machineName]) map[r.machineName] = { machine: r.machineName, line: r.productionLine || "-", count: 0, downtime: 0 };
+      map[r.machineName].count += 1;
+      map[r.machineName].downtime += Number(r.downtimeMinutes) || 0;
+    });
+    return Object.values(map).sort((a, b) =>
+      type === "machines" ? b.count - a.count : b.downtime - a.downtime
+    );
+  }, [records, type]);
+
+  const thCls = cx("px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide", dark ? "text-slate-400 border-b border-slate-700" : "text-slate-500 border-b border-slate-200");
+  const tdCls = cx("px-3 py-2.5 text-sm", dark ? "text-slate-200 border-b border-slate-800" : "text-slate-700 border-b border-slate-100");
+  const trHover = dark ? "hover:bg-slate-800/60" : "hover:bg-slate-50";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div
+        className={cx("relative w-full max-w-3xl max-h-[80vh] flex flex-col rounded-2xl shadow-2xl", dark ? "bg-slate-900 border border-slate-700" : "bg-white border border-slate-200")}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className={cx("flex items-center justify-between px-5 py-4 border-b shrink-0", dark ? "border-slate-700" : "border-slate-200")}>
+          <div>
+            <p className={cx("text-base font-semibold", dark ? "text-white" : "text-slate-800")}>{title}</p>
+            <p className={cx("text-xs mt-0.5", dark ? "text-slate-400" : "text-slate-500")}>{subtitle}</p>
+          </div>
+          <button onClick={onClose} className={cx("p-1.5 rounded-lg transition-colors", dark ? "hover:bg-slate-700 text-slate-400" : "hover:bg-slate-100 text-slate-500")}>
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-auto flex-1">
+          {/* ── All Adjustments ── */}
+          {type === "adjustments" && (
+            <table className="w-full text-sm">
+              <thead className={cx("sticky top-0", dark ? "bg-slate-900" : "bg-white")}>
+                <tr>
+                  <th className={thCls}>Date</th>
+                  <th className={thCls}>Machine</th>
+                  <th className={thCls}>Line</th>
+                  <th className={thCls}>Category</th>
+                  <th className={thCls}>Downtime</th>
+                  <th className={thCls}>Result</th>
+                  <th className={thCls}>By</th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.length === 0 && (
+                  <tr><td colSpan={7} className={cx("px-3 py-6 text-center text-sm", dark ? "text-slate-500" : "text-slate-400")}>No records</td></tr>
+                )}
+                {records.map((r) => (
+                  <tr key={r.id} className={trHover}>
+                    <td className={tdCls}>{formatDate(r.adjustmentDate)}</td>
+                    <td className={cx(tdCls, "font-medium")}>{r.machineName || "-"}</td>
+                    <td className={tdCls}>{r.productionLine || "-"}</td>
+                    <td className={tdCls}>{r.category || "-"}</td>
+                    <td className={cx(tdCls, "font-mono")}>{minutesToHM(Number(r.downtimeMinutes) || 0)}</td>
+                    <td className={tdCls}>
+                      <span className={cx("text-xs px-2 py-0.5 rounded-full font-medium", RESULT_STYLES[r.result] || (dark ? "bg-slate-700 text-slate-300" : "bg-slate-100 text-slate-600"))}>
+                        {r.result || "-"}
+                      </span>
+                    </td>
+                    <td className={tdCls}>{r.adjustedBy || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {/* ── Machines Adjusted ── */}
+          {type === "machines" && (
+            <table className="w-full text-sm">
+              <thead className={cx("sticky top-0", dark ? "bg-slate-900" : "bg-white")}>
+                <tr>
+                  <th className={thCls}>#</th>
+                  <th className={thCls}>Machine</th>
+                  <th className={thCls}>Line</th>
+                  <th className={thCls}>Adjustments</th>
+                  <th className={thCls}>Total Downtime</th>
+                </tr>
+              </thead>
+              <tbody>
+                {machineRows.map((row, i) => (
+                  <tr key={row.machine} className={trHover}>
+                    <td className={cx(tdCls, "text-center w-10 text-slate-400")}>{i + 1}</td>
+                    <td className={cx(tdCls, "font-medium")}>{row.machine || "-"}</td>
+                    <td className={tdCls}>{row.line}</td>
+                    <td className={tdCls}>
+                      <span className={cx("font-semibold text-blue-600", dark && "text-blue-400")}>{row.count}</span>
+                    </td>
+                    <td className={cx(tdCls, "font-mono")}>{minutesToHM(row.downtime)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {/* ── Total Downtime breakdown ── */}
+          {type === "downtime" && (
+            <table className="w-full text-sm">
+              <thead className={cx("sticky top-0", dark ? "bg-slate-900" : "bg-white")}>
+                <tr>
+                  <th className={thCls}>#</th>
+                  <th className={thCls}>Machine</th>
+                  <th className={thCls}>Line</th>
+                  <th className={thCls}>Adjustments</th>
+                  <th className={thCls}>Total Downtime</th>
+                  <th className={thCls}>Bar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {machineRows.map((row, i) => {
+                  const maxDown = machineRows[0]?.downtime || 1;
+                  const pct = Math.round((row.downtime / maxDown) * 100);
+                  return (
+                    <tr key={row.machine} className={trHover}>
+                      <td className={cx(tdCls, "text-center w-10 text-slate-400")}>{i + 1}</td>
+                      <td className={cx(tdCls, "font-medium")}>{row.machine || "-"}</td>
+                      <td className={tdCls}>{row.line}</td>
+                      <td className={tdCls}>{row.count}</td>
+                      <td className={cx(tdCls, "font-mono font-semibold text-amber-600", dark && "text-amber-400")}>{minutesToHM(row.downtime)}</td>
+                      <td className={tdCls + " w-28"}>
+                        <div className={cx("h-2 rounded-full overflow-hidden", dark ? "bg-slate-700" : "bg-slate-100")}>
+                          <div className="h-full rounded-full bg-amber-500" style={{ width: `${pct}%` }} />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className={cx("px-5 py-3 shrink-0 border-t text-xs", dark ? "border-slate-700 text-slate-500" : "border-slate-100 text-slate-400")}>
+          กด ESC หรือคลิกด้านนอกเพื่อปิด
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryCards({ stats, records, dark }) {
+  const [modal, setModal] = useState(null);
+
   const items = [
-    { label: "Total Adjustments", thai: "จำนวนรายการปรับตั้งทั้งหมด", value: stats.total, icon: Wrench, color: "blue" },
-    { label: "Machines Adjusted", thai: "จำนวนเครื่องจักรที่มีการปรับตั้ง", value: stats.machinesAdjusted, icon: Factory, color: "violet" },
-    { label: "Total Downtime", thai: "เวลาหยุดเครื่องรวม", value: minutesToHM(stats.totalDowntime), icon: Clock, color: "amber" },
-    { label: "Most Adjusted Machine", thai: "เครื่องที่ปรับตั้งมากที่สุด", value: stats.mostAdjusted || "-", icon: Gauge, color: "rose", small: true },
+    { key: "adjustments", label: "Total Adjustments", thai: "จำนวนรายการปรับตั้งทั้งหมด", value: stats.total, icon: Wrench, color: "blue" },
+    { key: "machines", label: "Machines Adjusted", thai: "จำนวนเครื่องจักรที่มีการปรับตั้ง", value: stats.machinesAdjusted, icon: Factory, color: "violet" },
+    { key: "downtime", label: "Total Downtime", thai: "เวลาหยุดเครื่องรวม", value: minutesToHM(stats.totalDowntime), icon: Clock, color: "amber" },
+    { key: null, label: "Most Adjusted Machine", thai: "เครื่องที่ปรับตั้งมากที่สุด", value: stats.mostAdjusted || "-", icon: Gauge, color: "rose", small: true },
   ];
   const colorMap = {
     blue: dark ? "bg-blue-500/10 text-blue-400" : "bg-blue-50 text-blue-600",
@@ -828,24 +1000,41 @@ function SummaryCards({ stats, dark }) {
     rose: dark ? "bg-rose-500/10 text-rose-400" : "bg-rose-50 text-rose-600",
   };
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-      {items.map((it) => (
-        <Card key={it.label} dark={dark} className="p-4">
-          <div className="flex items-start justify-between">
-            <div className="min-w-0">
-              <p className={cx("text-xs font-medium", dark ? "text-slate-400" : "text-slate-500")}>{it.label}</p>
-              <p className={cx("text-[11px]", dark ? "text-slate-500" : "text-slate-400")}>{it.thai}</p>
-              <p className={cx("mt-2 font-semibold text-slate-900", dark && "text-white", it.small ? "text-base truncate" : "text-2xl")} title={String(it.value)}>
-                {it.value}
-              </p>
+    <>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {items.map((it) => (
+          <Card
+            key={it.label}
+            dark={dark}
+            className={cx("p-4 transition-all duration-150", it.key ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98]" : "")}
+          >
+            <div className="flex items-start justify-between" onClick={() => it.key && setModal(it.key)}>
+              <div className="min-w-0">
+                <p className={cx("text-xs font-medium", dark ? "text-slate-400" : "text-slate-500")}>{it.label}</p>
+                <p className={cx("text-[11px]", dark ? "text-slate-500" : "text-slate-400")}>{it.thai}</p>
+                <p className={cx("mt-2 font-semibold text-slate-900", dark && "text-white", it.small ? "text-base truncate" : "text-2xl")} title={String(it.value)}>
+                  {it.value}
+                </p>
+              </div>
+              <div className={cx("rounded-lg p-2 shrink-0", colorMap[it.color])}>
+                <it.icon className="w-5 h-5" />
+              </div>
             </div>
-            <div className={cx("rounded-lg p-2 shrink-0", colorMap[it.color])}>
-              <it.icon className="w-5 h-5" />
-            </div>
-          </div>
-        </Card>
-      ))}
-    </div>
+            {it.key && (
+              <p className={cx("text-[10px] mt-2", dark ? "text-slate-600" : "text-slate-300")}>คลิกเพื่อดูรายละเอียด →</p>
+            )}
+          </Card>
+        ))}
+      </div>
+      {modal && (
+        <SummaryDetailModal
+          type={modal}
+          records={records}
+          dark={dark}
+          onClose={() => setModal(null)}
+        />
+      )}
+    </>
   );
 }
 
@@ -1408,7 +1597,7 @@ function DashboardPage({ records, machines, dark }) {
   return (
     <div className="space-y-5">
       <DashboardFilters filters={filters} setFilters={setFilters} machines={machines} dark={dark} />
-      <SummaryCards stats={stats} dark={dark} />
+      <SummaryCards stats={stats} records={periodScoped} dark={dark} />
       <DowntimeByLineSection records={lineScoped} dark={dark} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <AdjustmentTrendChart buckets={buckets} dark={dark} />
@@ -2473,20 +2662,207 @@ function Header({ page, dark, setDark, setMobileOpen, connected, serverInfo }) {
 }
 
 /* ============================================================
+   LOGIN SYSTEM
+   ============================================================ */
+
+const LOGIN_USERS = [
+  { user: "B970451", password: "B970451", name: "NANTAWUT" },
+  { user: "C670122", password: "C670122", name: "PHANIDA" },
+  { user: "C270908", password: "C270908", name: "JASSADA" },
+  { user: "C470202", password: "C470202", name: "RUNGARUN" },
+  { user: "C170711", password: "C170711", name: "CHUTIPON" },
+  { user: "C270512", password: "C270512", name: "NUKOOL" },
+  { user: "C290019", password: "C290019", name: "SUNG HEHAU" },
+  { user: "B270326", password: "B270326", name: "JIRAWAT" },
+  { user: "C171313", password: "C171313", name: "THANA" },
+  { user: "C470116", password: "C470116", name: "NATTAWOO" },
+  { user: "C670143", password: "C670143", name: "NONTAPAT" },
+  { user: "C270580", password: "C270580", name: "THANAPHONG" },
+  { user: "C270279", password: "C270279", name: "LITHIKOR" },
+  { user: "B770226", password: "B770226", name: "SURADECH" },
+  { user: "C470194", password: "C470194", name: "NATTHIYA" },
+  { user: "B780168", password: "B780168", name: "WIYADA" },
+  { user: "B870226", password: "B870226", name: "YOTHIN" },
+  { user: "C270889", password: "C270889", name: "THANADOL" },
+  { user: "C270271", password: "C270271", name: "APIHSIT" },
+  { user: "C270094", password: "C270094", name: "KIETISAK" },
+  { user: "C075760", password: "C075760", name: "TANYARAT" },
+  { user: "C070201", password: "C070201", name: "GONRAVEE" },
+  { user: "C270202", password: "C270202", name: "SAHARAT" },
+  { user: "C171144", password: "C171144", name: "PANUPONG" },
+  { user: "C270994", password: "C270994", name: "WECHANAN" },
+  { user: "C470451", password: "C470451", name: "YABREL" },
+  { user: "C470106", password: "C470106", name: "NARIT" },
+  { user: "B782364", password: "B782364", name: "ONKUNYA" },
+  { user: "9020652", password: "9020652", name: "DARANEE" },
+  { user: "A276490", password: "A276490", name: "SUPIT" },
+  { user: "9625417", password: "9625417", name: "KULTHIRAT" },
+];
+
+function LoginPage({ onLogin, dark }) {
+  const [userId, setUserId] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    setTimeout(() => {
+      const found = LOGIN_USERS.find(
+        (u) => u.user.toUpperCase() === userId.trim().toUpperCase() &&
+               u.password === password.trim()
+      );
+      if (found) {
+        onLogin(found);
+      } else {
+        setError("User ID หรือ Password ไม่ถูกต้อง");
+      }
+      setLoading(false);
+    }, 400);
+  }
+
+  return (
+    <div className={cx(
+      "min-h-screen flex flex-col items-center justify-center p-4",
+      dark ? "bg-slate-950" : "bg-gradient-to-br from-blue-50 via-slate-50 to-indigo-100"
+    )}>
+      {/* Logo / Title */}
+      <div className="mb-8 text-center">
+        <div className={cx("inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4 shadow-lg",
+          dark ? "bg-blue-600" : "bg-blue-600")}>
+          <Wrench className="w-8 h-8 text-white" />
+        </div>
+        <h1 className={cx("text-2xl font-bold", dark ? "text-white" : "text-slate-800")}>
+          Machine Adjustment Log
+        </h1>
+        <p className={cx("text-sm mt-1", dark ? "text-slate-400" : "text-slate-500")}>
+          บันทึกการปรับตั้งเครื่องจักร
+        </p>
+      </div>
+
+      {/* Login Card */}
+      <div className={cx(
+        "w-full max-w-sm rounded-2xl shadow-xl border p-8",
+        dark ? "bg-slate-900 border-slate-700" : "bg-white border-slate-200"
+      )}>
+        <h2 className={cx("text-lg font-semibold mb-6", dark ? "text-white" : "text-slate-800")}>
+          เข้าสู่ระบบ
+        </h2>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* User ID */}
+          <div>
+            <label className={cx("text-xs font-medium block mb-1.5", dark ? "text-slate-400" : "text-slate-600")}>
+              User ID
+            </label>
+            <input
+              type="text"
+              value={userId}
+              onChange={(e) => { setUserId(e.target.value); setError(""); }}
+              placeholder="กรอก User ID"
+              autoFocus
+              autoComplete="username"
+              className={cx(
+                "w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors",
+                dark
+                  ? "bg-slate-800 border-slate-600 text-slate-100 placeholder-slate-500 focus:border-blue-500"
+                  : "bg-white border-slate-300 text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
+              )}
+            />
+          </div>
+
+          {/* Password */}
+          <div>
+            <label className={cx("text-xs font-medium block mb-1.5", dark ? "text-slate-400" : "text-slate-600")}>
+              Password
+            </label>
+            <div className="relative">
+              <input
+                type={showPw ? "text" : "password"}
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setError(""); }}
+                placeholder="กรอก Password"
+                autoComplete="current-password"
+                className={cx(
+                  "w-full rounded-lg border px-3 py-2.5 pr-10 text-sm outline-none transition-colors",
+                  dark
+                    ? "bg-slate-800 border-slate-600 text-slate-100 placeholder-slate-500 focus:border-blue-500"
+                    : "bg-white border-slate-300 text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
+                )}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPw((v) => !v)}
+                className={cx("absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded", dark ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600")}
+              >
+                {showPw ? <Eye className="w-4 h-4" /> : <Eye className="w-4 h-4 opacity-50" />}
+              </button>
+            </div>
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div className="flex items-center gap-2 text-red-500 text-xs bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              <XCircle className="w-4 h-4 shrink-0" />
+              {error}
+            </div>
+          )}
+
+          {/* Submit */}
+          <button
+            type="submit"
+            disabled={loading || !userId || !password}
+            className={cx(
+              "w-full py-2.5 rounded-lg text-sm font-semibold transition-all",
+              loading || !userId || !password
+                ? "bg-blue-300 text-white cursor-not-allowed"
+                : "bg-blue-600 hover:bg-blue-700 text-white shadow-sm active:scale-[0.98]"
+            )}
+          >
+            {loading ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
+          </button>
+        </form>
+      </div>
+
+      <p className={cx("mt-6 text-xs", dark ? "text-slate-600" : "text-slate-400")}>
+        สอบถามข้อมูลผู้ดูแลระบบ กรณีลืม User ID / Password
+      </p>
+    </div>
+  );
+}
+
+/* ============================================================
    ROOT APP
    ============================================================ */
 
 export default function App() {
+  // Auth state — persisted in sessionStorage (cleared on browser close)
+  const [currentUser, setCurrentUser] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem("mal_user") || "null"); } catch { return null; }
+  });
+
+  function handleLogin(user) {
+    sessionStorage.setItem("mal_user", JSON.stringify(user));
+    setCurrentUser(user);
+  }
+
+  function handleLogout() {
+    sessionStorage.removeItem("mal_user");
+    setCurrentUser(null);
+  }
+
   const [dark, setDark] = useState(false);
   const [page, setPage] = useState(() => localStorage.getItem("activePage") || "dashboard");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [apiLoading, setApiLoading] = useState(null); // null = hidden, string = message shown
+  const [apiLoading, setApiLoading] = useState(null);
   const [toast, setToast] = useState(null);
   const [connected, setConnected] = useState(true);
   const [serverInfo, setServerInfo] = useState(null);
   const toastTimer = useRef(null);
-
   const [lines, setLines] = useState(LINES);
   const [machines, setMachines] = useState([]);
   const [records, setRecords] = useState([]);
@@ -2497,7 +2873,6 @@ export default function App() {
     toastTimer.current = setTimeout(() => setToast(null), 3000);
   }, []);
 
-  // Wrap any async API call with loading overlay
   const withApiLoading = useCallback(async (message, fn) => {
     setApiLoading(message);
     try {
@@ -2739,6 +3114,11 @@ export default function App() {
 
   function handleResetDemo() {
     loadData();
+  }
+
+  // Render login page if not authenticated
+  if (!currentUser) {
+    return <LoginPage onLogin={handleLogin} dark={dark} />;
   }
 
   return (
