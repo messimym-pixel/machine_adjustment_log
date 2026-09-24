@@ -2697,6 +2697,7 @@ const LOGIN_USERS = [
   { user: "9020652", password: "9020652", name: "DARANEE" },
   { user: "A276490", password: "A276490", name: "SUPIT" },
   { user: "9625417", password: "9625417", name: "KULTHIRAT" },
+  { user: "C670176", password: "C670176", name: "C670176" },
 ];
 
 function LoginPage({ onLogin, dark }) {
